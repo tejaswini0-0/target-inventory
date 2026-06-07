@@ -1,5 +1,3 @@
-Here's the README as plain text, no tables:
-
 # Target Inventory Sync with AI Anomaly Detection
 A production-style event-driven microservices system simulating Target's inventory management pipeline, with real-time ML anomaly detection on the event stream.
 
