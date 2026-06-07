@@ -41,12 +41,26 @@ def get_inventory(product_id: str):
 @app.post("/purchase")
 def purchase(event: PurchaseEvent):
     try:
+        df = run_postgres_query(
+            f"SELECT quantity FROM inventory WHERE product_id = '{event.product_id}' AND store_id = '{event.store_id}'",
+            **POSTGRES_DB_ARGS
+        )
+        if df.empty:
+            raise HTTPException(status_code=404, detail="Product or store not found")
+        current_qty = int(df.iloc[0]["quantity"])
+        if event.quantity > current_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock. Requested {event.quantity} but only {current_qty} available."
+            )
         publish_event(kafka_producer, "inventory-events", {
             "event_type": "purchase",
             **event.model_dump(),
             "timestamp": datetime.now().isoformat()
         })
         return {"status": "ok", "event": event.model_dump(), "timestamp": datetime.now().isoformat()}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

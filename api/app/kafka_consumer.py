@@ -48,6 +48,23 @@ def run_consumer():
             cur = conn.cursor()
 
             if event["event_type"] == "purchase":
+                # Check current stock before allowing purchase
+                cur.execute("""
+                    SELECT quantity FROM inventory
+                    WHERE product_id = %s AND store_id = %s
+                """, (event["product_id"], event["store_id"]))
+                row = cur.fetchone()
+                if row is None:
+                    print(f"Product {event['product_id']} at {event['store_id']} not found.")
+                    cur.close()
+                    conn.close()
+                    continue
+                current_qty = row[0]
+                if event["quantity"] > current_qty:
+                    print(f"REJECTED: {event['product_id']} at {event['store_id']} - requested {event['quantity']} but only {current_qty} in stock.")
+                    cur.close()
+                    conn.close()
+                    continue
                 cur.execute("""
                     UPDATE inventory
                     SET quantity = quantity - %s,
@@ -63,6 +80,11 @@ def run_consumer():
                     WHERE product_id = %s AND store_id = %s
                 """, (event["quantity"], event["product_id"], event["store_id"]))
 
+            conn.commit()
+            cur.execute("""
+                INSERT INTO inventory_history (product_id, store_id, quantity, event_type)
+                VALUES (%s, %s, %s, %s)
+            """, (event["product_id"], event["store_id"], event["quantity"], event["event_type"]))
             conn.commit()
             cur.close()
             conn.close()
