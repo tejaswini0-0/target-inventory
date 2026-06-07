@@ -1,25 +1,100 @@
 services:
-  meal_demand_postgres:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  target_postgres:
     image: postgres:13
     environment:
       POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: postgres
       POSTGRES_PORT: 5432
     volumes:
       - ./../postgres_data:/var/lib/postgresql/data
-  meal_demand_api:
+
+  target_inventory_api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "80:80"
     environment:
-      POSTGRES_HOST: meal_demand_postgres
+      POSTGRES_HOST: target_postgres
       POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
       POSTGRES_DB: postgres
       POSTGRES_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     volumes:
       - ./app:/app
     depends_on:
-      - meal_demand_postgres
+      - target_postgres
+      - kafka
 
+  target_inventory_consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python kafka_consumer.py
+    environment:
+      POSTGRES_HOST: target_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./app:/app
+    depends_on:
+      - target_postgres
+      - kafka
+
+  target_anomaly_detector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python anomaly_detector.py
+    environment:
+      POSTGRES_HOST: target_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./app:/app
+    depends_on:
+      - target_postgres
+      - kafka
+  target_dashboard:
+    image: python:3.11
+    working_dir: /app
+    command: >
+      bash -c "pip install streamlit==1.36.0 pandas==2.2.2 psycopg2-binary==2.9.9 altair==5.3.0 &&
+               streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0"
+    ports:
+      - "8501:8501"
+    environment:
+      POSTGRES_HOST: target_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./../dashboard/app:/app
+    depends_on:
+      - target_postgres

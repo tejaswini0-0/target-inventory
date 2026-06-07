@@ -1,69 +1,61 @@
-# ML Quest #1: Demand Forecasting
-https://www.patreon.com/ZazenCodes/shop/ml-quest-1-demand-forecasting-full-344393
+Here's the README as plain text, no tables:
 
-![Quest Map](assets/ml_quest_1_demand_forecasting.png)
+# Target Inventory Sync with AI Anomaly Detection
+A production-style event-driven microservices system simulating Target's inventory management pipeline, with real-time ML anomaly detection on the event stream.
 
-## Notebooks
+## Architecture
+Purchase and restock events flow from the FastAPI service into Apache Kafka. The inventory consumer reads from Kafka and updates PostgreSQL. Simultaneously, the Isolation Forest anomaly detector watches the same stream and saves alerts to the database. The Streamlit dashboard shows everything live at localhost:8501.
 
-### Part 1: Data Exploration and Cleaning
+## Services
 
-Download VS Code or Jupyter Notebook and open `notebooks/1_explore_clean.ipynb` to see setup instructions.
+target_inventory_api — FastAPI app exposing purchase, restock, inventory, and health endpoints
+kafka — Apache Kafka message broker for event streaming
+zookeeper — Kafka cluster manager
+target_postgres — PostgreSQL storing inventory levels and anomaly alerts
+target_inventory_consumer — Kafka consumer that updates inventory and triggers auto-restock
+target_anomaly_detector — Isolation Forest ML model watching the event stream for anomalies
+target_dashboard — Streamlit dashboard showing live inventory and alerts
 
+## Features
 
-### Part 2: Feature Engineering and Modeling
+Event-driven architecture: all inventory changes flow through Kafka
+Real-time ML anomaly detection using Isolation Forest (no labeled data needed)
+Auto-restock trigger when stock drops below 20 units
+Live Streamlit dashboard with inventory charts and anomaly alert feed
+Health check endpoint for service monitoring
+Fully containerized with Docker Compose
 
-Same setup as Part 1.
-
-### Part 3: Forecast
-
-Same setup as Part 1.
-
-## Python Model Library
-
+## Quick Start
 ```bash
-cd model
-
-# Spin up postgres
-docker compose up --build -d meal_demand_postgres
-
-# Train model (replace artifact data)
-docker compose run --build meal_demand_app train
-
-# Generate forecast (replace postgres data)
-docker compose run --build meal_demand_app predict
-
-# Spin down
-docker compose down
-```
-
-## Model Serving API
-
-```bash
-cd api
-
-# Spin up fastapi and postgres
+git clone https://github.com/YOUR_USERNAME/target-inventory.git
+cd target-inventory/api
 docker compose up --build
-
-# Fetch demand forecast
-curl http://localhost/forecast \
-    -X POST -H 'Content-Type: application/json' \
-    -d '{"city_name": "Briarwood", "meal_name": "Spiced Apple Tart"}'
-
-# Spin down
-docker compose down
 ```
+Open http://localhost:8501 for the dashboard. API runs at http://localhost:80.
 
-## User Dashboard
+## API Endpoints
 
-```bash
-cd dashboard
+GET /inventory/{product_id} — current stock levels
+POST /purchase — record a purchase event
+POST /restock — record a restock event
+GET /alerts — get anomaly alerts
+GET /health — service health check
 
-# Spin up streamlit and postgres
-docker compose up --build
+## Anomaly Detection
+The Isolation Forest model watches every purchase event on the Kafka stream. It builds a rolling history of normal purchase quantities per product and flags outliers — sudden large purchases, potential fraud, or flash-sale patterns. Alerts are saved to the anomaly_alerts table and shown live on the dashboard.
 
-# Open web browser: http://localhost:8501
+## Tech Stack
 
-# Spin down
-docker compose down
-```
+Apache Kafka — event streaming
+FastAPI — REST API
+PostgreSQL — inventory and alerts storage
+scikit-learn Isolation Forest — streaming anomaly detection
+Streamlit — live dashboard
+Docker Compose — local microservices orchestration
+
+## Inspired By
+Target's Inventory Move team stack: Kafka, microservices, streaming data pipelines, and daily CI/CD deployments.
+
+## Credits
+Built on top of the ML Quest 1 Demand Forecasting project by ZazenCodes, licensed under Creative Commons Attribution 4.0 International. The original project provided the FastAPI and Streamlit skeleton which was extended into a full event-driven inventory system with Kafka and ML anomaly detection.
 
