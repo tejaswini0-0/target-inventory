@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import os
+import requests
 from postgres import run_postgres_query
 
 POSTGRES_DB_ARGS = dict(
@@ -12,15 +13,72 @@ POSTGRES_DB_ARGS = dict(
     password=os.environ["POSTGRES_PASSWORD"],
 )
 
+API_URL = "http://target_inventory_api:80"
+
 st.set_page_config(page_title="Target Inventory Dashboard", layout="wide")
-st.title("🎯 Target Inventory & Anomaly Detection Dashboard")
+st.title("Target Inventory & Anomaly Detection Dashboard")
 st.markdown("Live inventory levels and ML-detected anomalies across all stores.")
 
-# Auto-refresh every 10 seconds
-st.markdown(
-    "<meta http-equiv='refresh' content='10'>",
-    unsafe_allow_html=True
+if st.button("Refresh Data"):
+    st.rerun()
+
+##################################################################
+# CONTROL PANEL
+##################################################################
+
+st.header("Control Panel", divider="red")
+st.markdown("Simulate purchase and restock events directly from the dashboard.")
+
+inventory_df_for_controls = run_postgres_query(
+    "SELECT DISTINCT product_id FROM inventory ORDER BY product_id",
+    **POSTGRES_DB_ARGS
 )
+store_df_for_controls = run_postgres_query(
+    "SELECT DISTINCT store_id FROM inventory ORDER BY store_id",
+    **POSTGRES_DB_ARGS
+)
+
+product_list = inventory_df_for_controls["product_id"].tolist()
+store_list = store_df_for_controls["store_id"].tolist()
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    selected_product = st.selectbox("Product", product_list)
+with col2:
+    selected_store = st.selectbox("Store", store_list)
+with col3:
+    selected_quantity = st.slider("Quantity", min_value=1, max_value=500, value=10)
+
+col_buy, col_restock = st.columns(2)
+with col_buy:
+    if st.button("🛒 Purchase", use_container_width=True):
+        try:
+            response = requests.post(f"{API_URL}/purchase", json={
+                "product_id": selected_product,
+                "store_id": selected_store,
+                "quantity": selected_quantity
+            })
+            if response.status_code == 200:
+                st.success(f"Purchase of {selected_quantity} units of {selected_product} at {selected_store} sent!")
+            else:
+                st.error(f"Error: {response.text}")
+        except Exception as e:
+            st.error(f"Could not reach API: {e}")
+
+with col_restock:
+    if st.button("📦 Restock", use_container_width=True):
+        try:
+            response = requests.post(f"{API_URL}/restock", json={
+                "product_id": selected_product,
+                "store_id": selected_store,
+                "quantity": selected_quantity
+            })
+            if response.status_code == 200:
+                st.success(f"Restock of {selected_quantity} units of {selected_product} at {selected_store} sent!")
+            else:
+                st.error(f"Error: {response.text}")
+        except Exception as e:
+            st.error(f"Could not reach API: {e}")
 
 ##################################################################
 # INVENTORY SECTION
@@ -28,18 +86,19 @@ st.markdown(
 
 st.header("Current Inventory Levels", divider="red")
 
-inventory_df = run_postgres_query("SELECT * FROM inventory ORDER BY product_id, store_id", **POSTGRES_DB_ARGS)
+inventory_df = run_postgres_query(
+    "SELECT * FROM inventory ORDER BY product_id, store_id",
+    **POSTGRES_DB_ARGS
+)
 
 if inventory_df.empty:
     st.warning("No inventory data found.")
 else:
-    # Summary metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Products", inventory_df["product_id"].nunique())
     col2.metric("Total Stores", inventory_df["store_id"].nunique())
     col3.metric("Low Stock Items (< 50)", int((inventory_df["quantity"] < 50).sum()))
 
-    # Inventory table with color coding
     st.dataframe(
         inventory_df,
         column_config={
@@ -52,7 +111,6 @@ else:
         use_container_width=True,
     )
 
-    # Bar chart of inventory by product and store
     chart = (
         alt.Chart(inventory_df)
         .mark_bar()
@@ -65,6 +123,46 @@ else:
         .properties(title="Inventory by Product and Store")
     )
     st.altair_chart(chart, use_container_width=True)
+
+##################################################################
+# STOCK HISTORY CHART
+##################################################################
+
+st.header("Stock History", divider="red")
+
+try:
+    history_df = run_postgres_query(
+        "SELECT * FROM inventory_history ORDER BY recorded_at DESC LIMIT 200",
+        **POSTGRES_DB_ARGS
+    )
+
+    if history_df.empty:
+        st.info("No history yet — send some purchase or restock events using the control panel above.")
+    else:
+        selected_history_product = st.selectbox(
+            "Select product to view history",
+            history_df["product_id"].unique().tolist()
+        )
+
+        filtered_history = history_df[history_df["product_id"] == selected_history_product].copy()
+        filtered_history["recorded_at"] = pd.to_datetime(filtered_history["recorded_at"])
+
+        history_chart = (
+            alt.Chart(filtered_history)
+            .mark_point(size=80)
+            .encode(
+                x=alt.X("recorded_at:T", title="Time"),
+                y=alt.Y("quantity:Q", title="Event Quantity"),
+                color=alt.Color("event_type:N", title="Event Type"),
+                shape=alt.Shape("store_id:N", title="Store"),
+                tooltip=["product_id", "store_id", "quantity", "event_type", "recorded_at"],
+            )
+            .properties(title=f"Event History for {selected_history_product}")
+        )
+        st.altair_chart(history_chart, use_container_width=True)
+
+except Exception as e:
+    st.info("History table not ready yet.")
 
 ##################################################################
 # ANOMALY ALERTS SECTION
@@ -101,7 +199,6 @@ try:
             use_container_width=True,
         )
 
-        # Chart of anomalous quantities over time
         if len(alerts_df) > 1:
             alerts_chart = (
                 alt.Chart(alerts_df)
@@ -116,4 +213,4 @@ try:
             st.altair_chart(alerts_chart, use_container_width=True)
 
 except Exception as e:
-    st.info("Anomaly alerts table not yet created — send some purchase events first.")
+    st.info("Anomaly alerts table not yet created.")
