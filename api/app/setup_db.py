@@ -3,7 +3,6 @@ import os
 import time
 
 def setup():
-    # Wait for Postgres to be ready
     time.sleep(5)
 
     conn = psycopg2.connect(
@@ -15,6 +14,7 @@ def setup():
     )
     cur = conn.cursor()
 
+    # Inventory table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS inventory (
             product_id VARCHAR(100),
@@ -25,6 +25,43 @@ def setup():
         );
     """)
 
+    # Inventory history table
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_history (
+            id SERIAL PRIMARY KEY,
+            product_id VARCHAR(100),
+            store_id VARCHAR(100),
+            quantity INTEGER,
+            event_type VARCHAR(50),
+            recorded_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
+    # Anomaly alerts table — with velocity and severity
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS anomaly_alerts (
+            id SERIAL PRIMARY KEY,
+            product_id VARCHAR(100),
+            store_id VARCHAR(100),
+            quantity INTEGER,
+            velocity INTEGER,
+            anomaly_score FLOAT,
+            severity VARCHAR(20),
+            detected_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
+    # Restock cooldown table — tracks last restock per product-store
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS restock_cooldown (
+            product_id VARCHAR(100),
+            store_id VARCHAR(100),
+            last_restock TIMESTAMP DEFAULT NOW(),
+            PRIMARY KEY (product_id, store_id)
+        );
+    """)
+
+    # Seed inventory
     cur.execute("""
         INSERT INTO inventory (product_id, store_id, quantity)
         VALUES
@@ -59,28 +96,6 @@ def setup():
             ('TOOTHBRUSH_010',  'STORE_LA',  350),
             ('TOOTHBRUSH_010',  'STORE_CHI', 375)
         ON CONFLICT (product_id, store_id) DO NOTHING;
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS inventory_history (
-            id SERIAL PRIMARY KEY,
-            product_id VARCHAR(100),
-            store_id VARCHAR(100),
-            quantity INTEGER,
-            event_type VARCHAR(50),
-            recorded_at TIMESTAMP DEFAULT NOW()
-        );
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS anomaly_alerts (
-            id SERIAL PRIMARY KEY,
-            product_id VARCHAR(100),
-            store_id VARCHAR(100),
-            quantity INTEGER,
-            anomaly_score FLOAT,
-            detected_at TIMESTAMP DEFAULT NOW()
-        );
     """)
 
     conn.commit()

@@ -16,10 +16,10 @@ POSTGRES_DB_ARGS = dict(
 API_URL = "http://target_inventory_api:80"
 
 st.set_page_config(page_title="Target Inventory Dashboard", layout="wide")
-st.title("Target Inventory & Anomaly Detection Dashboard")
+st.title("🎯 Target Inventory & Anomaly Detection Dashboard")
 st.markdown("Live inventory levels and ML-detected anomalies across all stores.")
 
-if st.button("Refresh Data"):
+if st.button("🔄 Refresh Data"):
     st.rerun()
 
 ##################################################################
@@ -179,38 +179,85 @@ try:
     if alerts_df.empty:
         st.success("No anomalies detected yet. System is healthy.")
     else:
-        st.error(f"{len(alerts_df)} anomalies detected!")
-
-        col1, col2 = st.columns(2)
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Alerts", len(alerts_df))
-        col2.metric("Most Flagged Product", alerts_df["product_id"].mode()[0])
+        col2.metric("High Severity", int((alerts_df["severity"] == "HIGH").sum()))
+        col3.metric("Medium Severity", int((alerts_df["severity"] == "MEDIUM").sum()))
+        col4.metric("Most Flagged Product", alerts_df["product_id"].mode()[0])
+
+        # Color code severity
+        def severity_color(val):
+            if val == "HIGH":
+                return "background-color: #ffcccc"
+            elif val == "MEDIUM":
+                return "background-color: #ffe5cc"
+            elif val == "LOW":
+                return "background-color: #ffffcc"
+            return ""
+
+        styled_alerts = alerts_df.style.applymap(severity_color, subset=["severity"])
 
         st.dataframe(
-            alerts_df,
+            styled_alerts,
             column_config={
                 "id": None,
                 "product_id": st.column_config.TextColumn("Product"),
                 "store_id": st.column_config.TextColumn("Store"),
-                "quantity": st.column_config.NumberColumn("Suspicious Quantity", format="%d"),
+                "quantity": st.column_config.NumberColumn("Suspicious Qty", format="%d"),
+                "velocity": st.column_config.NumberColumn("Velocity /min", format="%d"),
                 "anomaly_score": st.column_config.NumberColumn("Anomaly Score", format="%.3f"),
+                "severity": st.column_config.TextColumn("Severity"),
                 "detected_at": st.column_config.TextColumn("Detected At"),
             },
             hide_index=True,
             use_container_width=True,
         )
 
-        if len(alerts_df) > 1:
-            alerts_chart = (
-                alt.Chart(alerts_df)
-                .mark_point(size=100, color="red")
-                .encode(
-                    x=alt.X("detected_at:T", title="Time"),
-                    y=alt.Y("quantity:Q", title="Flagged Quantity"),
-                    tooltip=["product_id", "store_id", "quantity", "anomaly_score"],
-                )
-                .properties(title="Anomaly Timeline")
+        # Severity breakdown chart
+        severity_counts = alerts_df["severity"].value_counts().reset_index()
+        severity_counts.columns = ["severity", "count"]
+        severity_order = ["HIGH", "MEDIUM", "LOW"]
+        severity_colors = {"HIGH": "#ff4444", "MEDIUM": "#ff8800", "LOW": "#ffcc00"}
+
+        severity_chart = (
+            alt.Chart(severity_counts)
+            .mark_bar()
+            .encode(
+                x=alt.X("severity:N", sort=severity_order, title="Severity"),
+                y=alt.Y("count:Q", title="Number of Alerts"),
+                color=alt.Color("severity:N",
+                    scale=alt.Scale(
+                        domain=list(severity_colors.keys()),
+                        range=list(severity_colors.values())
+                    ),
+                    legend=None
+                ),
+                tooltip=["severity", "count"]
             )
-            st.altair_chart(alerts_chart, use_container_width=True)
+            .properties(title="Alerts by Severity")
+        )
+        st.altair_chart(severity_chart, use_container_width=True)
+
+        # Velocity vs quantity scatter plot
+        if len(alerts_df) > 1:
+            scatter = (
+                alt.Chart(alerts_df)
+                .mark_point(size=100)
+                .encode(
+                    x=alt.X("velocity:Q", title="Purchase Velocity (per min)"),
+                    y=alt.Y("quantity:Q", title="Purchase Quantity"),
+                    color=alt.Color("severity:N",
+                        scale=alt.Scale(
+                            domain=list(severity_colors.keys()),
+                            range=list(severity_colors.values())
+                        )
+                    ),
+                    tooltip=["product_id", "store_id", "quantity", "velocity", "severity", "anomaly_score"],
+                )
+                .properties(title="Velocity vs Quantity — Anomaly Map")
+            )
+            st.altair_chart(scatter, use_container_width=True)
 
 except Exception as e:
-    st.info("Anomaly alerts table not yet created.")
+    st.info("Anomaly alerts table not yet created — run setup_db.py first.")
